@@ -1628,7 +1628,7 @@ fn get_route(
 	};
 	let route = router.find_route(
 		&start,
-		&RouteParameters { payment_params, final_value_msat: final_value_msat.unwrap_or(546000) },
+		&RouteParameters { payment_params, final_value_msat: final_value_msat.unwrap_or(HTLC_MIN_MSAT) },
 		None,
 		&inflight_htlcs,
 		asset_id,
@@ -1671,7 +1671,7 @@ fn maker_execute(
 		exchange,
 		channel_manager.get_our_node_id(),
 		if swaptype.is_buy() { Some(asset_id) } else { None },
-		if swaptype.is_buy() { Some(546000) } else { Some(swaptype.amount_msats()) },
+		if swaptype.is_buy() { Some(HTLC_MIN_MSAT) } else { Some(swaptype.amount_msats()) },
 	);
 
 	let (mut first_leg, mut second_leg) = match (first_leg, second_leg) {
@@ -1695,7 +1695,7 @@ fn maker_execute(
 	if let SwapType::BuyAsset { .. } = swaptype {
 		// Generally in the last hop the fee_amount is set to the payment amount, so we set it
 		// to 546 sats (the payment amount for rgb payments)
-		first_leg.paths[0].hops.last_mut().expect("Path not to be empty").fee_msat = 546000;
+		first_leg.paths[0].hops.last_mut().expect("Path not to be empty").fee_msat = HTLC_MIN_MSAT;
 	}
 
 	let fullpaths = first_leg.paths[0]
@@ -1705,14 +1705,14 @@ fn maker_execute(
 		.map(|mut hop| {
 			if let SwapType::SellAsset { amount_rgb, .. } = swaptype {
 				hop.rgb_amount = Some(amount_rgb);
-				hop.payment_amount = 546000;
+				hop.payment_amount = HTLC_MIN_MSAT;
 			}
 			hop
 		})
 		.chain(second_leg.paths[0].hops.clone().into_iter().map(|mut hop| {
 			if let SwapType::BuyAsset { amount_rgb, .. } = swaptype {
 				hop.rgb_amount = Some(amount_rgb);
-				hop.payment_amount = 546000;
+				hop.payment_amount = HTLC_MIN_MSAT;
 			}
 			hop
 		}))
