@@ -1724,7 +1724,7 @@ fn maker_execute(
 	};
 
 	if let SwapType::SellAsset { amount_rgb, .. } = swaptype {
-		write_rgb_payment_info_file(&ldk_data_dir, &payment_hash, asset_id, amount_rgb);
+		write_rgb_payment_info_file(&ldk_data_dir, &payment_hash, asset_id, amount_rgb, None);
 	}
 
 	let status = match channel_manager.send_spontaneous_payment(
@@ -1732,7 +1732,6 @@ fn maker_execute(
 		Some(payment_preimage),
 		RecipientOnionFields::spontaneous_empty(),
 		PaymentId(payment_hash.0),
-		None,
 	) {
 		Ok(_payment_hash) => {
 			println!("EVENT: initiated swap");
@@ -1895,6 +1894,7 @@ fn send_payment(
 			&payment_hash,
 			contract_id,
 			invoice.rgb_amount().unwrap(),
+			Some(invoice.rgb_amount().unwrap())
 		);
 	}
 	let status =
@@ -1934,7 +1934,7 @@ fn keysend<E: EntropySource>(
 	let payment_preimage = PaymentPreimage(entropy_source.get_secure_random_bytes());
 	let payment_hash = PaymentHash(Sha256::hash(&payment_preimage.0[..]).into_inner());
 	if let Some((contract_id, amt_rgb)) = rgb_payment {
-		write_rgb_payment_info_file(&ldk_data_dir, &payment_hash, contract_id, amt_rgb);
+		write_rgb_payment_info_file(&ldk_data_dir, &payment_hash, contract_id, amt_rgb, Some(amt_rgb));
 	}
 
 	let route_params = RouteParameters {
@@ -1947,7 +1947,6 @@ fn keysend<E: EntropySource>(
 		PaymentId(payment_hash.0),
 		route_params,
 		Retry::Timeout(Duration::from_secs(10)),
-		rgb_payment.map(|(_, v)| v),
 	) {
 		Ok(_payment_hash) => {
 			println!("EVENT: initiated sending {} msats to {}", amt_msat, payee_pubkey);
