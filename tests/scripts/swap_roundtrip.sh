@@ -25,6 +25,7 @@ list_channels 1 2
 maker_init 2 10 "sell" 900
 taker 1
 taker_list 1 1
+maker_list 2 1
 maker_execute 2
 
 sleep 5

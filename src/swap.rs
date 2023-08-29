@@ -5,7 +5,7 @@ use rgb::contract::ContractId;
 
 use crate::hex_utils;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum SwapType {
 	BuyAsset { amount_rgb: u64, amount_msats: u64 },
 	SellAsset { amount_rgb: u64, amount_msats: u64 },

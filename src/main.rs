@@ -165,6 +165,7 @@ async fn handle_ldk_events(
 	proxy_client: Arc<RestClient>, proxy_url: String,
 	wallet_arc: Arc<Mutex<Wallet<SqliteDatabase>>>, electrum_url: String,
 	whitelisted_trades: &Arc<Mutex<HashMap<PaymentHash, (ContractId, SwapType)>>>,
+	maker_trades: &Arc<Mutex<HashMap<PaymentHash, (ContractId, SwapType)>>>,
 ) {
 	match event {
 		Event::FundingGenerationReady {
@@ -474,6 +475,8 @@ async fn handle_ldk_events(
 				}
 			}
 			println!("Event::PaymentClaimed end");
+
+			maker_trades.lock().unwrap().remove(&payment_hash);
 		}
 		Event::PaymentSent { payment_preimage, payment_hash, fee_paid_msat, .. } => {
 			let mut payments = outbound_payments.lock().unwrap();
@@ -1399,6 +1402,7 @@ async fn start_ldk() {
 	// Step 18: Handle LDK Events
 	let channel_manager_event_listener = Arc::clone(&channel_manager);
 	let whitelisted_trades = Arc::new(Mutex::new(HashMap::new()));
+	let maker_trades = Arc::new(Mutex::new(HashMap::new()));
 	let network_graph_event_listener = Arc::clone(&network_graph);
 	let keys_manager_event_listener = Arc::clone(&keys_manager);
 	let inbound_payments_event_listener = Arc::clone(&inbound_payments);
@@ -1408,6 +1412,7 @@ async fn start_ldk() {
 	let proxy_client_copy = proxy_client.clone();
 	let wallet_copy = wallet.clone();
 	let whitelisted_trades_copy = whitelisted_trades.clone();
+	let maker_trades_copy = maker_trades.clone();
 	let event_handler = move |event: Event| {
 		let channel_manager_event_listener = Arc::clone(&channel_manager_event_listener);
 		let network_graph_event_listener = Arc::clone(&network_graph_event_listener);
@@ -1418,6 +1423,7 @@ async fn start_ldk() {
 		let proxy_client_copy = proxy_client_copy.clone();
 		let wallet_copy = wallet_copy.clone();
 		let whitelisted_trades_copy = whitelisted_trades_copy.clone();
+		let maker_trades_copy = maker_trades_copy.clone();
 		async move {
 			handle_ldk_events(
 				&channel_manager_event_listener,
@@ -1433,6 +1439,7 @@ async fn start_ldk() {
 				wallet_copy,
 				electrum_url.to_string(),
 				&whitelisted_trades_copy,
+				&maker_trades_copy,
 			)
 			.await;
 		}
@@ -1542,6 +1549,7 @@ async fn start_ldk() {
 		wallet.clone(),
 		electrum_url.to_string(),
 		whitelisted_trades,
+		maker_trades,
 	)
 	.await;
 
