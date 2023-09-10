@@ -13,6 +13,7 @@ mod swap;
 
 use crate::bdk_utils::{broadcast_tx, get_bdk_wallet, get_bdk_wallet_seckey, sync_wallet};
 use crate::bitcoind_client::BitcoindClient;
+use crate::cli::HTLC_MIN_MSAT;
 use crate::disk::FilesystemLogger;
 use crate::proxy::post_consignment;
 use crate::rgb_utils::{get_asset_owned_values, update_transition_beneficiary, RgbUtilities};
@@ -993,8 +994,10 @@ async fn handle_ldk_events(
 
 			match whitelist_swap_type {
 				SwapType::BuyAsset { amount_rgb, amount_msats } => {
-					let net_msat_diff =
-						expected_outbound_amount_msat.saturating_sub(inbound_amount_msat);
+					// We subtract HTLC_MIN_MSAT because a node receiving an RGB payment also receives that amount of sats with it as the payment amount,
+					// so we exclude it from the calculation of how many sats we are effectively giving out.
+					let net_msat_diff = (expected_outbound_amount_msat)
+						.saturating_sub(inbound_amount_msat.saturating_sub(HTLC_MIN_MSAT));
 
 					if inbound_rgb_amount != Some(*amount_rgb)
 						|| inbound_rgb_info.map(|x| x.0) != Some(*whitelist_contract_id)

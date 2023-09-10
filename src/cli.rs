@@ -83,7 +83,7 @@ const OPENCHANNEL_MAX_SAT: u64 = 16777215;
 
 const DUST_LIMIT_MSAT: u64 = 546000;
 
-const HTLC_MIN_MSAT: u64 = 3000000;
+pub(crate) const HTLC_MIN_MSAT: u64 = 3000000;
 
 const INVOICE_MIN_MSAT: u64 = HTLC_MIN_MSAT;
 
@@ -1764,7 +1764,7 @@ fn maker_execute(
 	second_leg.paths[0].hops[0].short_channel_id |= 0x80000000_00000000;
 	if let SwapType::BuyAsset { .. } = swaptype {
 		// Generally in the last hop the fee_amount is set to the payment amount, so we set it
-		// to 546 sats (the payment amount for rgb payments)
+		// to HTLC_MIN_MSAT to cover the fees for the next RGB hop.
 		first_leg.paths[0].hops.last_mut().expect("Path not to be empty").fee_msat = HTLC_MIN_MSAT;
 	}
 
@@ -1776,6 +1776,7 @@ fn maker_execute(
 			if let SwapType::SellAsset { amount_rgb, .. } = swaptype {
 				hop.rgb_amount = Some(amount_rgb);
 				hop.payment_amount = HTLC_MIN_MSAT;
+				hop.fee_msat = 0;
 			}
 			hop
 		})
@@ -1783,6 +1784,7 @@ fn maker_execute(
 			if let SwapType::BuyAsset { amount_rgb, .. } = swaptype {
 				hop.rgb_amount = Some(amount_rgb);
 				hop.payment_amount = HTLC_MIN_MSAT;
+				hop.fee_msat = 0;
 			}
 			hop
 		}))
