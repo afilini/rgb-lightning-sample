@@ -71,7 +71,7 @@ impl std::str::FromStr for SwapString {
 		let payment_hash = iter.next();
 
 		if payment_hash.is_none() || iter.next().is_some() {
-			return Err("Wrong number of parts");
+			return Err("Parsing swap string: wrong number of parts");
 		}
 
 		let amount = amount.unwrap().parse::<u64>();
@@ -88,7 +88,7 @@ impl std::str::FromStr for SwapString {
 			|| expiry.is_err()
 			|| payment_hash.is_none()
 		{
-			return Err("Unable to parse parts");
+			return Err("Parsing swap string: unable to parse parts");
 		}
 
 		let amount = amount.unwrap();

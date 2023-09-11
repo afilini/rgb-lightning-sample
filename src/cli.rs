@@ -45,6 +45,7 @@ use lightning::routing::router::{
 use lightning::routing::router::{PaymentParameters, RouteParameters};
 use lightning::util::config::{ChannelHandshakeConfig, ChannelHandshakeLimits, UserConfig};
 use lightning::util::ser::{Writeable, Writer};
+use lightning::util::IS_SWAP_SCID;
 use lightning_invoice::payment::pay_invoice;
 use lightning_invoice::{utils, Currency, Invoice};
 use reqwest::Client as RestClient;
@@ -737,7 +738,7 @@ pub(crate) async fn poll_for_user_input(
 						continue;
 					}
 					let push_amt_msat = push_amt_msat.unwrap();
-					if push_amt_msat < DUST_LIMIT_MSAT {
+					if is_colored && push_amt_msat < DUST_LIMIT_MSAT {
 						println!(
 							"ERROR: push amount must be equal or higher than the dust limit ({})",
 							DUST_LIMIT_MSAT
@@ -861,47 +862,8 @@ pub(crate) async fn poll_for_user_input(
 						PathBuf::from(&ldk_data_dir),
 					);
 				}
-				"keysend" => {
-					let keysend_cmd = "`keysend <dest_pubkey> <amt_msat>";
-					let dest_pubkey = match words.next() {
-						Some(dest) => match hex_utils::to_compressed_pubkey(dest) {
-							Some(pk) => pk,
-							None => {
-								println!("ERROR: couldn't parse destination pubkey");
-								continue;
-							}
-						},
-						None => {
-							println!("ERROR: keysend requires a destination pubkey: {keysend_cmd}");
-							continue;
-						}
-					};
-					let amt_msat_str =
-						match words.next() {
-							Some(amt) => amt,
-							None => {
-								println!("ERROR: keysend requires an amount in millisatoshis: {keysend_cmd}");
-								continue;
-							}
-						};
-					let amt_msat: u64 = match amt_msat_str.parse() {
-						Ok(amt) => amt,
-						Err(e) => {
-							println!("ERROR: couldn't parse amount_msat: {}", e);
-							continue;
-						}
-					};
-					keysend(
-						&*channel_manager,
-						dest_pubkey,
-						amt_msat,
-						&*keys_manager,
-						outbound_payments.clone(),
-						None,
-						PathBuf::from(&ldk_data_dir),
-					);
-				}
-				"coloredkeysend" => {
+				"keysend" | "coloredkeysend" => {
+					let is_colored = word == "coloredkeysend";
 					let keysend_cmd = "`keysend <dest_pubkey> <amt_msat> <contract_id> <amt_rgb>`";
 					let dest_pubkey = match words.next() {
 						Some(dest) => match hex_utils::to_compressed_pubkey(dest) {
@@ -931,36 +893,41 @@ pub(crate) async fn poll_for_user_input(
 							continue;
 						}
 					};
-					if amt_msat < HTLC_MIN_MSAT {
-						println!("ERROR: amount_msat cannot be less than {HTLC_MIN_MSAT}");
-						continue;
-					}
-					let contract_id = match words.next() {
-						Some(contract_id_str) => match ContractId::from_str(contract_id_str) {
-							Ok(cid) => cid,
-							Err(_) => {
-								println!("ERROR: invalid contract ID: {contract_id_str}");
+					let rgb_payment = if is_colored {
+						if amt_msat < HTLC_MIN_MSAT {
+							println!("ERROR: amount_msat cannot be less than {HTLC_MIN_MSAT}");
+							continue;
+						}
+						let contract_id = match words.next() {
+							Some(contract_id_str) => match ContractId::from_str(contract_id_str) {
+								Ok(cid) => cid,
+								Err(_) => {
+									println!("ERROR: invalid contract ID: {contract_id_str}");
+									continue;
+								}
+							},
+							None => {
+								println!("ERROR: keysend requires a contract ID: {keysend_cmd}");
 								continue;
 							}
-						},
-						None => {
-							println!("ERROR: keysend requires a contract ID: {keysend_cmd}");
-							continue;
-						}
-					};
-					let amt_rgb_str = match words.next() {
-						Some(amt) => amt,
-						None => {
-							println!("ERROR: keysend requires an RGB amount: {keysend_cmd}");
-							continue;
-						}
-					};
-					let amt_rgb: u64 = match amt_rgb_str.parse() {
-						Ok(amt) => amt,
-						Err(e) => {
-							println!("ERROR: couldn't parse amt_rgb: {e}");
-							continue;
-						}
+						};
+						let amt_rgb_str = match words.next() {
+							Some(amt) => amt,
+							None => {
+								println!("ERROR: keysend requires an RGB amount: {keysend_cmd}");
+								continue;
+							}
+						};
+						let amt_rgb: u64 = match amt_rgb_str.parse() {
+							Ok(amt) => amt,
+							Err(e) => {
+								println!("ERROR: couldn't parse amt_rgb: {e}");
+								continue;
+							}
+						};
+						Some((contract_id, amt_rgb))
+					} else {
+						None
 					};
 					keysend(
 						&*channel_manager,
@@ -968,7 +935,7 @@ pub(crate) async fn poll_for_user_input(
 						amt_msat,
 						&*keys_manager,
 						outbound_payments.clone(),
-						Some((contract_id, amt_rgb)),
+						rgb_payment,
 						PathBuf::from(&ldk_data_dir),
 					);
 				}
@@ -1097,6 +1064,9 @@ pub(crate) async fn poll_for_user_input(
 				"listchannels" => {
 					list_channels(&channel_manager, &network_graph, ldk_data_dir.clone())
 				}
+				// Called by the service/exchange to initiate the trade. The swaptype is seen from
+				// the poin of view of the user, so "buy" means that the user (=taker) is buying
+				// assets for bitcoin, and sell that the user is selling assets for bitcoin
 				"makerinit" => {
 					let amt_asset = words.next();
 					let asset_id = words.next();
@@ -1116,14 +1086,18 @@ pub(crate) async fn poll_for_user_input(
 							continue;
 						}
 					};
-					let timeout = timeout.unwrap().parse();
-					if timeout.is_err() {
-						println!("ERROR: Invalid expity_secs value");
-						continue;
-					}
-					let timeout = timeout.unwrap();
+					let timeout = match timeout.unwrap().parse() {
+						Ok(t) if t > 0 => t,
+						Ok(_) | Err(_) => {
+							println!("ERROR: Invalid expiry_secs value");
+							continue;
+						}
+					};
 					let price = match price {
-						Some(x) if !x.trim().is_empty() => x.parse::<u64>().map_err(|_| ()),
+						Some(x) if !x.trim().is_empty() => x.parse::<u64>().map_err(|_| {
+							println!("ERROR: invalid price_msats_per_asset");
+							()
+						}),
 						_ => fetch_price(&asset_id).await.map_err(|e| {
 							println!("ERROR: invalid price_msats_per_asset: {}", e);
 							()
@@ -1133,12 +1107,17 @@ pub(crate) async fn poll_for_user_input(
 						continue;
 					}
 					let price = price.unwrap();
-					let amt_asset = amt_asset.unwrap().parse::<u64>();
-					if amt_asset.is_err() {
-						println!("ERROR: invalid amt_asset");
+					if price == 0 {
+						println!("ERROR: invalid price_msats_per_asset");
 						continue;
 					}
-					let amt_asset = amt_asset.unwrap();
+					let amt_asset = match amt_asset.unwrap().parse::<u64>() {
+						Ok(amt) if amt > 0 => amt,
+						Ok(_) | Err(_) => {
+							println!("ERROR: invalid amt_asset");
+							continue;
+						}
+					};
 					let swaptype = match swaptype {
 						Some("buy") => SwapType::BuyAsset {
 							amount_rgb: amt_asset,
@@ -1686,8 +1665,6 @@ fn get_route(
 		previously_failed_channels: vec![],
 		final_cltv_expiry_delta: 14,
 	};
-	// let usable_channels = channel_manager.list_usable_channels();
-	// let usable_channels = usable_channels.iter().collect::<Vec<_>>();
 	let route = router.find_route(
 		&start,
 		&RouteParameters {
@@ -1716,29 +1693,35 @@ fn maker_init(
 }
 
 fn maker_execute(
-	channel_manager: &ChannelManager, router: &Router, exchange: PublicKey, swaptype: SwapType,
+	channel_manager: &ChannelManager, router: &Router, taker_pk: PublicKey, swaptype: SwapType,
 	asset_id: ContractId, payment_hash: PaymentHash, payment_secret: PaymentSecret,
 	payment_storage: PaymentInfoStorage, ldk_data_dir: PathBuf,
 ) {
-	let payment_preimage =
-		channel_manager.get_payment_preimage(payment_hash, payment_secret).unwrap();
+	let payment_preimage = match channel_manager.get_payment_preimage(payment_hash, payment_secret)
+	{
+		Ok(p) => p,
+		Err(e) => {
+			println!("ERROR: unable to find payment preimage, have you provided the correct swapstring and payment secret? {:?}", e);
+			return;
+		}
+	};
 	// The cli takes the swaptype from the point of view of the user (=who wants to do the trade)
 	// In this function we're the market maker (=who sends the payment, completing the user trade)
-	// We swap the swaptype to opefully make this function easier to read
+	// We swap the swaptype to hopefully make this function easier to read
 	let swaptype = swaptype.opposite();
 
 	let first_leg = get_route(
 		channel_manager,
 		router,
 		channel_manager.get_our_node_id(),
-		exchange,
+		taker_pk,
 		if swaptype.is_buy() { None } else { Some(asset_id) },
 		if swaptype.is_buy() { Some(swaptype.amount_msats()) } else { None },
 	);
 	let second_leg = get_route(
 		channel_manager,
 		router,
-		exchange,
+		taker_pk,
 		channel_manager.get_our_node_id(),
 		if swaptype.is_buy() { Some(asset_id) } else { None },
 		if swaptype.is_buy() { Some(HTLC_MIN_MSAT) } else { Some(swaptype.amount_msats()) },
@@ -1747,11 +1730,11 @@ fn maker_execute(
 	let (mut first_leg, mut second_leg) = match (first_leg, second_leg) {
 		(Some(f), Some(s)) => (f, s),
 		(Some(_), _) => {
-			println!("ERROR: unable to find from the exchange to us");
+			println!("ERROR: unable to find from the taker to us");
 			return;
 		}
 		(_, Some(_)) => {
-			println!("ERROR: unable to find path to the exchange");
+			println!("ERROR: unable to find path to the taker");
 			return;
 		}
 		_ => {
@@ -1761,7 +1744,7 @@ fn maker_execute(
 	};
 
 	// Set swap flag
-	second_leg.paths[0].hops[0].short_channel_id |= 0x80000000_00000000;
+	second_leg.paths[0].hops[0].short_channel_id |= IS_SWAP_SCID;
 	if let SwapType::BuyAsset { .. } = swaptype {
 		// Generally in the last hop the fee_amount is set to the payment amount, so we set it
 		// to HTLC_MIN_MSAT to cover the fees for the next RGB hop.
@@ -1844,6 +1827,11 @@ async fn fetch_price(asset_id: &ContractId) -> Result<u64, Box<dyn std::error::E
 		.await?;
 
 	let last_price = body.last_price.parse::<f64>()?;
+	if last_price == 0.0 {
+		return Err(Box::<dyn std::error::Error>::from(
+			"BTC/USDt price fetched from bitfinex is zero",
+		));
+	}
 	let price = (1.0 / last_price * 1e11) as u64;
 
 	println!("Using price from Bitfinex: {} mSAT = 1 {}", price, asset_id);
