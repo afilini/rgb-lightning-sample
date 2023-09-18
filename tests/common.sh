@@ -299,9 +299,9 @@ open_vanilla_channel() {
 
     $TMUX_CMD send-keys -t "node$src_num" "listchannels" C-m
     sleep 1
-    channel_id=$(_wait_for_text 5 "node$src_num" "[^_]channel_id:" \
+    CHANNEL_ID=$(_wait_for_text 5 "node$src_num" "[^_]channel_id:" \
         | head -1 | grep -Eo '[0-9a-f]{64}')
-    _out "channel ID: $channel_id"
+    _out "channel ID: $CHANNEL_ID"
 }
 
 
