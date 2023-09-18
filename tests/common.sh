@@ -239,7 +239,7 @@ open_colored_channel() {
     rgb_amt="$5"
     current_chan_num="${6:-0}"
     _tit "open channel from node $src_num to node $dst_num with $rgb_amt assets"
-    $TMUX_CMD send-keys -t "node$src_num" "opencoloredchannel $dst_id@127.0.0.1:$dst_port 30010 1394000 $ASSET_ID $rgb_amt --public" C-m
+    $TMUX_CMD send-keys -t "node$src_num" "opencoloredchannel $dst_id@127.0.0.1:$dst_port 16777215 1394000 $ASSET_ID $rgb_amt --public" C-m
     check "$src_num"
     _wait_for_text_multi $T_1 "node$src_num" "opencoloredchannel" "HANDLED ACCEPT CHANNEL"
     timestamp

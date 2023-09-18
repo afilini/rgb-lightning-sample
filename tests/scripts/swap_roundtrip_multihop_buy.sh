@@ -35,8 +35,13 @@ list_channels 2 2
 list_channels 3
 asset_balance 2 100
 
+# needs more funding
+create_utxos 1
+create_utxos 2
+create_utxos 3
+
 open_vanilla_channel 2 1 "$NODE1_PORT" "$NODE1_ID" 16777215
-list_channels 2 2
+list_channels 2 3
 list_channels 1 2
 
 open_vanilla_channel 3 2 "$NODE2_PORT" "$NODE2_ID" 16777215
