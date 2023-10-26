@@ -39,6 +39,9 @@ use lightning::rgb_utils::{
 	get_rgb_channel_info, write_rgb_channel_info, RgbInfo, RgbUtxo, RgbUtxos,
 };
 use lightning::routing::gossip::NodeId;
+use lightning::routing::gossip::RoutingFees;
+use lightning::routing::router::RouteHint;
+use lightning::routing::router::RouteHintHop;
 use lightning::routing::router::{
 	Hints, Path as LnPath, Route, Router as RouterTrait, DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA,
 };
@@ -1702,13 +1705,13 @@ fn list_payments(inbound_payments: PaymentInfoStorage, outbound_payments: Paymen
 
 fn get_route(
 	channel_manager: &ChannelManager, router: &Router, start: PublicKey, dest: PublicKey,
-	asset_id: Option<ContractId>, final_value_msat: Option<u64>,
+	asset_id: Option<ContractId>, final_value_msat: Option<u64>, hints: Vec<RouteHint>,
 ) -> Option<Route> {
 	let inflight_htlcs = channel_manager.compute_inflight_htlcs();
 	let payment_params = PaymentParameters {
 		payee_pubkey: dest,
 		features: None,
-		route_hints: Hints::Clear(vec![]),
+		route_hints: Hints::Clear(hints),
 		expiry_time: None,
 		max_total_cltv_expiry_delta: DEFAULT_MAX_TOTAL_CLTV_EXPIRY_DELTA,
 		max_path_count: 1,
@@ -1761,6 +1764,25 @@ fn maker_execute(
 	// We swap the swaptype to hopefully make this function easier to read
 	let swaptype = swaptype.opposite();
 
+	let receive_hints = channel_manager
+		.list_usable_channels()
+		.iter()
+		.map(|details| {
+			let config = details.counterparty.forwarding_info.as_ref().unwrap();
+			RouteHint(vec![RouteHintHop {
+				src_node_id: details.counterparty.node_id,
+				short_channel_id: details.short_channel_id.unwrap(),
+				cltv_expiry_delta: config.cltv_expiry_delta,
+				htlc_maximum_msat: None,
+				htlc_minimum_msat: None,
+				fees: RoutingFees {
+					base_msat: config.fee_base_msat,
+					proportional_millionths: config.fee_proportional_millionths,
+				},
+			}])
+		})
+		.collect();
+
 	let first_leg = get_route(
 		channel_manager,
 		router,
@@ -1768,6 +1790,7 @@ fn maker_execute(
 		taker_pk,
 		if swaptype.is_buy() { None } else { Some(asset_id) },
 		if swaptype.is_buy() { Some(swaptype.amount_msats()) } else { None },
+		vec![],
 	);
 	let second_leg = get_route(
 		channel_manager,
@@ -1776,6 +1799,7 @@ fn maker_execute(
 		channel_manager.get_our_node_id(),
 		if swaptype.is_buy() { Some(asset_id) } else { None },
 		if swaptype.is_buy() { Some(HTLC_MIN_MSAT) } else { Some(swaptype.amount_msats()) },
+		receive_hints,
 	);
 
 	let (mut first_leg, mut second_leg) = match (first_leg, second_leg) {
